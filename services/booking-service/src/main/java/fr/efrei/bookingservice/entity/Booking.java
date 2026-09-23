@@ -1,6 +1,7 @@
 package fr.efrei.bookingservice.entity;
 
 import jakarta.persistence.*;
+import fr.efrei.bookingservice.domain.BookingStatus;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -22,6 +23,10 @@ public class Booking {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "listing_id", nullable = false)
     private UUID listingId;

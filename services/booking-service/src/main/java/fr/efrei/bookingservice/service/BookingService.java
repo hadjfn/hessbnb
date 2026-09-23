@@ -3,20 +3,21 @@ package fr.efrei.bookingservice.service;
 import fr.efrei.bookingservice.dto.BookingCreateRequest;
 import fr.efrei.bookingservice.dto.BookingResponse;
 import fr.efrei.bookingservice.entity.Booking;
-import fr.efrei.bookingservice.entity.BookingStatus;
+import fr.efrei.bookingservice.domain.BookingStatus;
 import fr.efrei.bookingservice.exception.BookingNotFoundException;
 import fr.efrei.bookingservice.mapper.BookingMapper;
 import fr.efrei.bookingservice.repository.BookingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import fr.efrei.bookingservice.config.RabbitMQConfig;
+import fr.efrei.bookingservice.port.BookingEvents;
+import fr.efrei.bookingservice.domain.BookingPolicy;
+import java.time.Clock;
+import java.time.LocalDate;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -27,12 +28,13 @@ public class BookingService {
 
     private final BookingRepository bookingRepository;
     private final BookingMapper bookingMapper;
-    private final RabbitTemplate rabbitTemplate;
+    private final BookingEvents bookingEvents;
+    private final Clock clock;
 
-    public BookingResponse getById(UUID id) {
-        return bookingRepository.findById(id)
-                .map(bookingMapper::toResponse)
-                .orElseThrow(() -> new BookingNotFoundException(id));
+    public BookingResponse getById(UUID id, UUID actorId) {
+        Booking booking = bookingRepository.findById(id).orElseThrow(() -> new BookingNotFoundException(id));
+        BookingPolicy.requireParticipant(booking.getTenantId(), booking.getOwnerId(), actorId);
+        return bookingMapper.toResponse(booking);
     }
 
     public List<BookingResponse> getByTenantId(UUID tenantId) {
@@ -47,22 +49,16 @@ public class BookingService {
                 .toList();
     }
 
-    public List<BookingResponse> getByListingId(UUID listingId) {
-        return bookingRepository.findByListingId(listingId).stream()
+    public List<BookingResponse> getByListingId(UUID listingId, UUID ownerId) {
+        return bookingRepository.findByListingIdAndOwnerId(listingId, ownerId).stream()
                 .map(bookingMapper::toResponse)
                 .toList();
     }
 
     @Transactional
     public BookingResponse create(UUID tenantId, BookingCreateRequest request) {
-        if (request.checkOutDate().isBefore(request.checkInDate()) ||
-                request.checkOutDate().isEqual(request.checkInDate())) {
-            throw new IllegalArgumentException("Check-out date must be after check-in date");
-        }
-
-        if (tenantId.equals(request.ownerId())) {
-            throw new IllegalArgumentException("You cannot book your own listing");
-        }
+        BookingPolicy.validateStay(tenantId, request.ownerId(), request.checkInDate(), request.checkOutDate(),
+                request.guestsCount(), request.totalPrice(), LocalDate.now(clock));
 
         if (bookingRepository.existsOverlapping(request.listingId(), request.checkInDate(), request.checkOutDate())) {
             throw new IllegalStateException("This listing is already booked for the selected dates");
@@ -70,13 +66,9 @@ public class BookingService {
 
         Booking booking = bookingMapper.toEntity(request);
         booking.setTenantId(tenantId);
-        Booking saved = bookingRepository.save(booking);
+        Booking saved = bookingRepository.saveAndFlush(booking);
 
-        rabbitTemplate.convertAndSend(
-                RabbitMQConfig.EXCHANGE,
-                RabbitMQConfig.BOOKING_CREATED_KEY,
-                bookingMapper.toResponse(saved)
-        );
+        bookingEvents.record("created", bookingMapper.toResponse(saved), null);
 
         return bookingMapper.toResponse(saved);
     }
@@ -86,32 +78,24 @@ public class BookingService {
         Booking booking = bookingRepository.findById(id)
                 .orElseThrow(() -> new BookingNotFoundException(id));
 
-        if (!booking.getOwnerId().equals(ownerId)) {
-            throw new IllegalArgumentException("Only the listing owner can confirm bookings");
-        }
-        if (booking.getStatus() != BookingStatus.PENDING) {
-            throw new IllegalStateException("Only pending bookings can be confirmed");
-        }
+        BookingPolicy.requireOwner(booking.getOwnerId(), ownerId);
+        booking.setStatus(BookingPolicy.confirm(booking.getStatus()));
+        Booking saved = bookingRepository.saveAndFlush(booking);
 
-        booking.setStatus(BookingStatus.CONFIRMED);
-        Booking saved = bookingRepository.save(booking);
-
-        rabbitTemplate.convertAndSend(
-                RabbitMQConfig.EXCHANGE,
-                RabbitMQConfig.BOOKING_CONFIRMED_KEY,
-                bookingMapper.toResponse(saved)
-        );
+        bookingEvents.record("confirmed", bookingMapper.toResponse(saved), null);
 
         return bookingMapper.toResponse(saved);
     }
 
     @Transactional
-    public void cancelAllByListing(UUID listingId) {
+    public void cancelAllByListing(UUID listingId, UUID ownerId) {
         List<Booking> active = bookingRepository.findByListingIdAndStatusIn(
                 listingId, List.of(BookingStatus.PENDING, BookingStatus.CONFIRMED));
         for (Booking booking : active) {
-            booking.setStatus(BookingStatus.CANCELLED);
-            bookingRepository.save(booking);
+            BookingPolicy.requireOwner(booking.getOwnerId(), ownerId);
+            booking.setStatus(BookingPolicy.cancel(booking.getStatus()));
+            bookingRepository.saveAndFlush(booking);
+            bookingEvents.record("cancelled", bookingMapper.toResponse(booking), "OWNER");
         }
     }
 
@@ -120,40 +104,14 @@ public class BookingService {
         Booking booking = bookingRepository.findById(id)
                 .orElseThrow(() -> new BookingNotFoundException(id));
 
-        if (!booking.getTenantId().equals(userId) && !booking.getOwnerId().equals(userId)) {
-            throw new IllegalArgumentException("Only the tenant or owner can cancel a booking");
-        }
-        if (booking.getStatus() == BookingStatus.CANCELLED || booking.getStatus() == BookingStatus.COMPLETED) {
-            throw new IllegalStateException("This booking cannot be cancelled");
-        }
-
-        booking.setStatus(BookingStatus.CANCELLED);
-        Booking saved = bookingRepository.save(booking);
+        BookingPolicy.requireParticipant(booking.getTenantId(), booking.getOwnerId(), userId);
+        booking.setStatus(BookingPolicy.cancel(booking.getStatus()));
+        Booking saved = bookingRepository.saveAndFlush(booking);
 
         boolean cancelledByOwner = booking.getOwnerId().equals(userId);
-        Map<String, Object> event = new HashMap<>(toEventMap(bookingMapper.toResponse(saved)));
-        event.put("cancelledBy", cancelledByOwner ? "OWNER" : "TENANT");
-
-        rabbitTemplate.convertAndSend(
-                RabbitMQConfig.EXCHANGE,
-                RabbitMQConfig.BOOKING_CANCELLED_KEY,
-                event
-        );
+        bookingEvents.record("cancelled", bookingMapper.toResponse(saved), cancelledByOwner ? "OWNER" : "TENANT");
 
         return bookingMapper.toResponse(saved);
     }
 
-    private Map<String, Object> toEventMap(BookingResponse response) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("id", response.id().toString());
-        map.put("listingId", response.listingId().toString());
-        map.put("tenantId", response.tenantId().toString());
-        map.put("ownerId", response.ownerId().toString());
-        map.put("checkInDate", response.checkInDate().toString());
-        map.put("checkOutDate", response.checkOutDate().toString());
-        map.put("guestsCount", response.guestsCount());
-        map.put("totalPrice", response.totalPrice().toString());
-        map.put("status", response.status());
-        return map;
-    }
 }

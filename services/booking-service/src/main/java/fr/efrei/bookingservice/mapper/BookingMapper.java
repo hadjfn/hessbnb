@@ -12,6 +12,7 @@ public interface BookingMapper {
     @Mapping(target = "status", expression = "java(booking.getStatus().name())")
     BookingResponse toResponse(Booking booking);
 
+    @Mapping(target = "version", ignore = true)
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "tenantId", ignore = true)
     @Mapping(target = "status", ignore = true)

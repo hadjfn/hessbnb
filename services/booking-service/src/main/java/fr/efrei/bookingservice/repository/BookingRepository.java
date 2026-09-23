@@ -1,7 +1,7 @@
 package fr.efrei.bookingservice.repository;
 
 import fr.efrei.bookingservice.entity.Booking;
-import fr.efrei.bookingservice.entity.BookingStatus;
+import fr.efrei.bookingservice.domain.BookingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +17,8 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     List<Booking> findByOwnerIdOrderByCreatedAtDesc(UUID ownerId);
 
     List<Booking> findByListingId(UUID listingId);
+
+    List<Booking> findByListingIdAndOwnerId(UUID listingId, UUID ownerId);
 
     List<Booking> findByListingIdAndStatus(UUID listingId, BookingStatus status);
 

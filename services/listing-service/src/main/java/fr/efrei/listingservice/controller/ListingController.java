@@ -65,6 +65,6 @@ public class ListingController {
             @PathVariable UUID id,
             @AuthenticationPrincipal Jwt jwt) {
         UUID ownerId = UUID.fromString(jwt.getSubject());
-        listingService.delete(id, ownerId);
+        listingService.delete(id, ownerId, jwt.getTokenValue());
     }
 }

@@ -31,7 +31,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/listings/uploads/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/users/{id}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/users/uploads/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/bookings/listing/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/reviews/listing/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated()

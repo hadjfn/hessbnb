@@ -116,7 +116,7 @@ public class ListingService {
     }
 
     @Transactional
-    public void delete(UUID id, UUID ownerId) {
+    public void delete(UUID id, UUID ownerId, String bearerToken) {
         Listing listing = listingRepository.findById(id)
                 .orElseThrow(() -> new ListingNotFoundException(id));
 
@@ -128,6 +128,7 @@ public class ListingService {
         try {
             List<Map<String, Object>> bookings = bookingClient.get()
                     .uri("/api/bookings/listing/{listingId}", id)
+                    .headers(headers -> headers.setBearerAuth(bearerToken))
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
             if (bookings != null) {
@@ -148,10 +149,11 @@ public class ListingService {
         try {
             bookingClient.patch()
                     .uri("/api/bookings/listing/{listingId}/cancel-all", id)
+                    .headers(headers -> headers.setBearerAuth(bearerToken))
                     .retrieve()
                     .toBodilessEntity();
         } catch (Exception e) {
-            log.warn("Impossible d'annuler les réservations du listing {}: {}", id, e.getMessage());
+            throw new IllegalStateException("Cannot delete listing before its bookings are cancelled", e);
         }
 
         listing.setStatus(ListingStatus.DELETED);

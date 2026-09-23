@@ -1,4 +1,4 @@
-package fr.efrei.bookingservice.entity;
+package fr.efrei.bookingservice.domain;
 
 public enum BookingStatus {
     PENDING,

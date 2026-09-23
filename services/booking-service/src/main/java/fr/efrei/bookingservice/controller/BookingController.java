@@ -21,8 +21,8 @@ public class BookingController {
     private final BookingService bookingService;
 
     @GetMapping("/{id}")
-    public BookingResponse getById(@PathVariable UUID id) {
-        return bookingService.getById(id);
+    public BookingResponse getById(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
+        return bookingService.getById(id, UUID.fromString(jwt.getSubject()));
     }
 
     @GetMapping("/my")
@@ -38,8 +38,8 @@ public class BookingController {
     }
 
     @GetMapping("/listing/{listingId}")
-    public List<BookingResponse> getByListing(@PathVariable UUID listingId) {
-        return bookingService.getByListingId(listingId);
+    public List<BookingResponse> getByListing(@PathVariable UUID listingId, @AuthenticationPrincipal Jwt jwt) {
+        return bookingService.getByListingId(listingId, UUID.fromString(jwt.getSubject()));
     }
 
     @PostMapping
@@ -61,8 +61,8 @@ public class BookingController {
 
     @PatchMapping("/listing/{listingId}/cancel-all")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void cancelAllByListing(@PathVariable UUID listingId) {
-        bookingService.cancelAllByListing(listingId);
+    public void cancelAllByListing(@PathVariable UUID listingId, @AuthenticationPrincipal Jwt jwt) {
+        bookingService.cancelAllByListing(listingId, UUID.fromString(jwt.getSubject()));
     }
 
     @PatchMapping("/{id}/cancel")
