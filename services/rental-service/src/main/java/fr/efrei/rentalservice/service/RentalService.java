@@ -48,12 +48,14 @@ public class RentalService {
 
     @Transactional
     public RentalResponse create(RentalCreateRequest request) {
-        if (rentalRepository.existsByBookingId(request.bookingId())) {
-            throw new IllegalStateException("A rental already exists for this booking");
-        }
-
-        Rental rental = rentalMapper.toEntity(request);
-        return rentalMapper.toResponse(rentalRepository.save(rental));
+        // RabbitMQ delivery is at least once. The database unique key, not a check-then-save,
+        // arbitrates concurrent duplicates without resetting an existing rental's status.
+        rentalRepository.insertIfAbsent(UUID.randomUUID(), request.bookingId(), request.listingId(),
+                request.tenantId(), request.ownerId(), request.startDate(), request.endDate(),
+                request.monthlyRent(), request.totalAmount());
+        Rental rental = rentalRepository.findByBookingId(request.bookingId())
+                .orElseThrow(() -> new IllegalStateException("Rental was not persisted"));
+        return rentalMapper.toResponse(rental);
     }
 
     @Transactional

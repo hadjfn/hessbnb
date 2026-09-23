@@ -22,10 +22,9 @@ public class BookingEventListener {
 
     @RabbitListener(queues = RabbitMQConfig.RENTAL_QUEUE)
     public void handleBookingConfirmed(Map<String, Object> event) {
+        RentalCreateRequest request;
         try {
-            log.info("Received booking confirmed event: {}", event.get("id"));
-
-            RentalCreateRequest request = new RentalCreateRequest(
+            request = new RentalCreateRequest(
                     UUID.fromString((String) event.get("id")),
                     UUID.fromString((String) event.get("listingId")),
                     UUID.fromString((String) event.get("tenantId")),
@@ -35,11 +34,12 @@ public class BookingEventListener {
                     null,
                     new BigDecimal(event.get("totalPrice").toString())
             );
-
-            rentalService.create(request);
-            log.info("Rental created for booking: {}", event.get("id"));
-        } catch (Exception e) {
-            log.error("Failed to process booking confirmed event", e);
+        } catch (RuntimeException error) {
+            // Parsing failures are permanent; infrastructure failures below must propagate.
+            throw new org.springframework.amqp.AmqpRejectAndDontRequeueException(
+                    "Invalid booking.confirmed payload", error);
         }
+        rentalService.create(request);
+        log.info("Rental confirmation processed for booking {}", request.bookingId());
     }
 }
