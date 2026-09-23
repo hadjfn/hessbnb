@@ -27,3 +27,6 @@ Thumbs.db
 
 postgres_data/
 infra/database/data/
+
+# Local credentials; the tracked example contains development defaults only.
+.env
